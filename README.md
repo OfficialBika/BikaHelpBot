@@ -1,4 +1,4 @@
-# Rose Bika Bot
+# Bika Help Bot
 
 Modern Miss Rose style modular Telegram group help bot.
 
