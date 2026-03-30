@@ -1,0 +1,31 @@
+from app.modules import (
+    admin,
+    bans,
+    blacklists,
+    filters,
+    forcejoin,
+    greetings,
+    help,
+    misc,
+    notes,
+    rules,
+    start,
+    tickets,
+    warns,
+)
+
+ALL_ROUTERS = [
+    start.router,
+    help.router,
+    admin.router,
+    greetings.router,
+    rules.router,
+    notes.router,
+    filters.router,
+    warns.router,
+    tickets.router,
+    forcejoin.router,
+    bans.router,
+    blacklists.router,
+    misc.router,
+]
