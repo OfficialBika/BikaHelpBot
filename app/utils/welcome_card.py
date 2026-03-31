@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
-import textwrap
 from pathlib import Path
 from typing import Optional
 
@@ -11,14 +11,14 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 CARD_TEXT_TEMPLATE = (
     "{fullname} ရေ\n\n"
     "{group_name} မှ\n"
     "လှိုက်လှဲစွာ ကြိုဆိုပါတယ်။\n\n"
-    "Group ထဲမှာ စကားတွေပြောရင်း\n"
-    "ဘဝရဲ့ ပျော်စရာအချိန်လေးတွေအဖြစ်\n"
-    "အတူတူ ဖန်တီးလိုက်ကြရအောင်။"
+    "Group ထဲမှာ ပျော်ပျော်ပါးပါး\n"
+    "အတူတူ စကားပြောလိုက်ကြရအောင်။"
 )
 
 
@@ -29,25 +29,31 @@ def ensure_output_dir() -> Path:
 
 
 def contains_myanmar(text: str) -> bool:
-    return any(
-        "\u1000" <= ch <= "\u109f" or "\uaa60" <= ch <= "\uaa7f"
-        for ch in text
-    )
+    return any("\u1000" <= ch <= "\u109F" or "\uAA60" <= ch <= "\uAA7F" for ch in text)
 
 
-def load_font(
-    size: int,
-    prefer_myanmar: bool = True,
-    bold: bool = False,
-):
+def safe_truetype(path: str | None, size: int):
+    if not path:
+        return None
+    if not os.path.exists(path):
+        return None
+    try:
+        return ImageFont.truetype(path, size=size)
+    except Exception:
+        return None
+
+
+def load_font(size: int, prefer_myanmar: bool = True, bold: bool = False):
     candidates: list[str] = []
 
+    # Myanmar first
     if prefer_myanmar:
         if bold and getattr(settings, "WELCOME_CARD_FONT_MYANMAR_BOLD", ""):
             candidates.append(settings.WELCOME_CARD_FONT_MYANMAR_BOLD)
         if getattr(settings, "WELCOME_CARD_FONT_MYANMAR", ""):
             candidates.append(settings.WELCOME_CARD_FONT_MYANMAR)
 
+    # Latin fallbacks
     if bold and getattr(settings, "WELCOME_CARD_FONT_LATIN_BOLD", ""):
         candidates.append(settings.WELCOME_CARD_FONT_LATIN_BOLD)
 
@@ -58,11 +64,9 @@ def load_font(
         candidates.append(settings.WELCOME_CARD_FONT_LATIN_ALT)
 
     for path in candidates:
-        if path and os.path.exists(path):
-            try:
-                return ImageFont.truetype(path, size=size)
-            except Exception:
-                pass
+        font = safe_truetype(path, size=size)
+        if font is not None:
+            return font
 
     return ImageFont.load_default()
 
@@ -76,11 +80,7 @@ def pick_font_for_text(text: str, size: int, bold: bool = False):
 
 
 def crop_to_circle(image: Image.Image, size: int) -> Image.Image:
-    image = ImageOps.fit(
-        image.convert("RGBA"),
-        (size, size),
-        method=Image.LANCZOS,
-    )
+    image = ImageOps.fit(image.convert("RGBA"), (size, size), method=Image.LANCZOS)
 
     mask = Image.new("L", (size, size), 0)
     mask_draw = ImageDraw.Draw(mask)
@@ -91,11 +91,21 @@ def crop_to_circle(image: Image.Image, size: int) -> Image.Image:
     return output
 
 
+def text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0]
+
+
+def text_height(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[3] - bbox[1]
+
+
 def wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
     lines: list[str] = []
 
     for paragraph in text.splitlines():
-        paragraph = paragraph.rstrip()
+        paragraph = paragraph.strip()
         if not paragraph:
             lines.append("")
             continue
@@ -104,12 +114,9 @@ def wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str
         current = ""
 
         for word in words:
-            test = f"{current} {word}".strip() if current else word
-            bbox = draw.textbbox((0, 0), test, font=font)
-            width = bbox[2] - bbox[0]
-
-            if width <= max_width:
-                current = test
+            candidate = f"{current} {word}".strip() if current else word
+            if text_width(draw, candidate, font) <= max_width:
+                current = candidate
                 continue
 
             if current:
@@ -117,13 +124,17 @@ def wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str
                 current = word
                 continue
 
-            rough = max(1, max_width // max(10, font.size // 2))
-            broken = textwrap.wrap(word, width=rough)
-            if broken:
-                lines.extend(broken[:-1])
-                current = broken[-1]
-            else:
-                current = word
+            # very long word fallback
+            temp = ""
+            for ch in word:
+                test = temp + ch
+                if text_width(draw, test, font) <= max_width:
+                    temp = test
+                else:
+                    if temp:
+                        lines.append(temp)
+                    temp = ch
+            current = temp
 
         if current:
             lines.append(current)
@@ -145,7 +156,8 @@ async def fetch_user_profile_image(bot, user_id: int) -> Optional[Image.Image]:
         bio.seek(0)
 
         return Image.open(bio).convert("RGBA")
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to fetch profile image for %s: %s", user_id, exc)
         return None
 
 
@@ -162,12 +174,11 @@ def render_card(
     base = Image.open(template_path).convert("RGBA")
     draw = ImageDraw.Draw(base)
 
-    # Left circle position
-    circle_x = 52
-    circle_y = 326
-    circle_size = 355
+    # Layout
+    circle_x = 36
+    circle_y = 346
+    circle_size = 350
 
-    # Right text box area
     text_x = 425
     text_y = 250
     text_w = 890
@@ -182,46 +193,36 @@ def render_card(
         group_name=group_name,
     )
 
-    title_font = pick_font_for_text(final_text, 44, bold=True)
+    # Important: use Myanmar-capable body font for whole block
     body_font = pick_font_for_text(final_text, 36, bold=False)
 
-    # If first line should look slightly stronger, we still render the full body with body font
-    # to keep Myanmar shaping consistent and line spacing stable.
     wrapped = wrap_text(draw, final_text, body_font, text_w)
     lines = wrapped.splitlines()
 
-    line_heights: list[int] = []
+    line_gap = 12
+    heights: list[int] = []
     for line in lines:
-        bbox = draw.textbbox((0, 0), line if line else "A", font=body_font)
-        h = bbox[3] - bbox[1]
-        line_heights.append(max(h, body_font.size + 8))
+        h = text_height(draw, line if line else "A", body_font)
+        heights.append(max(h, body_font.size + 6))
 
-    total_height = sum(line_heights) + max(0, (len(lines) - 1) * 10)
+    total_height = sum(heights) + (len(lines) - 1) * line_gap if lines else 0
     start_y = text_y + max(0, (text_h - total_height) // 2)
 
     current_y = start_y
+    shadow_fill = (35, 24, 16, 180)
+    text_fill = (255, 245, 230, 255)
+
     for idx, line in enumerate(lines):
         content = line if line else " "
-        font_to_use = body_font
+        w = text_width(draw, content, body_font)
+        x = text_x + (text_w - w) // 2
 
-        # Make very first visible line slightly stronger if desired
-        if idx == 0 and content.strip():
-            font_to_use = title_font
-
-        bbox = draw.textbbox((0, 0), content, font=font_to_use)
-        line_width = bbox[2] - bbox[0]
-        x = text_x + (text_w - line_width) // 2
-
-        # Soft shadow/glow
-        shadow_fill = (40, 25, 15, 180)
-        text_fill = (255, 245, 230, 255)
-
+        # soft shadow
         for ox, oy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            draw.text((x + ox, current_y + oy), content, font=font_to_use, fill=shadow_fill)
+            draw.text((x + ox, current_y + oy), content, font=body_font, fill=shadow_fill)
 
-        draw.text((x, current_y), content, font=font_to_use, fill=text_fill)
-
-        current_y += line_heights[idx] + 10
+        draw.text((x, current_y), content, font=body_font, fill=text_fill)
+        current_y += heights[idx] + line_gap
 
     out_dir = ensure_output_dir()
     safe_name = fullname[:30].replace(" ", "_").replace("/", "_")
