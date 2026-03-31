@@ -175,9 +175,9 @@ def render_card(
     draw = ImageDraw.Draw(base)
 
     # Layout
-    circle_x = 36
-    circle_y = 346
-    circle_size = 350
+    circle_x = 30
+    circle_y = 350
+    circle_size = 340
 
     text_x = 425
     text_y = 250
