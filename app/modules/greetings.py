@@ -15,6 +15,9 @@ from app.utils.welcome_card import fetch_user_profile_image, render_card
 router = Router()
 settings = get_settings()
 
+DEFAULT_WELCOME_TEXT = "ဟယ်လို {mention} 👋\n{chat_title} မှာ ကြိုဆိုပါတယ်။"
+DEFAULT_CARD_TEXT = DEFAULT_WELCOME_TEXT
+
 
 def build_welcome_buttons(raw_buttons: list[dict] | None):
     if not raw_buttons:
@@ -58,7 +61,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "photo",
                 "file_id": replied.photo[-1].file_id,
-                "welcome_text": fallback_text or replied.caption or "",
+                "welcome_text": fallback_text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -66,7 +69,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "video",
                 "file_id": replied.video.file_id,
-                "welcome_text": fallback_text or replied.caption or "",
+                "welcome_text": fallback_text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -74,7 +77,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "animation",
                 "file_id": replied.animation.file_id,
-                "welcome_text": fallback_text or replied.caption or "",
+                "welcome_text": fallback_text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -82,7 +85,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "document",
                 "file_id": replied.document.file_id,
-                "welcome_text": fallback_text or replied.caption or "",
+                "welcome_text": fallback_text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -90,7 +93,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "audio",
                 "file_id": replied.audio.file_id,
-                "welcome_text": fallback_text or replied.caption or "",
+                "welcome_text": fallback_text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -98,7 +101,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "voice",
                 "file_id": replied.voice.file_id,
-                "welcome_text": fallback_text or replied.caption or "",
+                "welcome_text": fallback_text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -106,7 +109,7 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "sticker",
                 "file_id": replied.sticker.file_id,
-                "welcome_text": fallback_text or "",
+                "welcome_text": fallback_text or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": False,
             }
 
@@ -114,14 +117,14 @@ def build_welcome_payload(message: Message, fallback_text: str = "") -> dict:
             return {
                 "welcome_type": "text",
                 "file_id": "",
-                "welcome_text": fallback_text or replied.text or replied.caption or "",
+                "welcome_text": fallback_text or replied.text or replied.caption or DEFAULT_WELCOME_TEXT,
                 "welcome_use_card": True,
             }
 
     return {
         "welcome_type": "text",
         "file_id": "",
-        "welcome_text": fallback_text or "ဟယ်လို {mention} 👋\n{chat_title} မှာ ကြိုဆိုပါတယ်။",
+        "welcome_text": fallback_text or DEFAULT_WELCOME_TEXT,
         "welcome_use_card": True,
     }
 
@@ -158,14 +161,10 @@ async def welcome_status_cmd(message: Message) -> None:
         await message.reply("ဒီ command ကို group ထဲမှာသာသုံးပါ။")
         return
 
-    enabled = await get_chat_setting(message.chat.id, "welcome_enabled", False)
+    enabled = await get_chat_setting(message.chat.id, "welcome_enabled", True)
     welcome_type = await get_chat_setting(message.chat.id, "welcome_type", "text")
     welcome_use_card = await get_chat_setting(message.chat.id, "welcome_use_card", True)
-    text = await get_chat_setting(
-        message.chat.id,
-        "welcome_text",
-        "ဟယ်လို {mention} 👋\n{chat_title} မှာ ကြိုဆိုပါတယ်။",
-    )
+    text = await get_chat_setting(message.chat.id, "welcome_text", DEFAULT_WELCOME_TEXT)
     clean = await get_chat_setting(message.chat.id, "clean_welcome", False)
     buttons = await get_chat_setting(message.chat.id, "welcome_buttons", [])
 
@@ -176,7 +175,6 @@ async def welcome_status_cmd(message: Message) -> None:
     await message.reply(
         join_lines(
             "<b>Welcome Settings</b>",
-            "",
             f"Enabled: {'✅' if enabled else '❌'}",
             f"Use Card: {'✅' if welcome_use_card else '❌'}",
             f"Type: <code>{welcome_type}</code>",
@@ -200,10 +198,10 @@ async def setwelcome_cmd(message: Message) -> None:
     if len(parts) > 1:
         text = parts[1].strip()
 
-    payload = build_welcome_payload(message, fallback_text=text)
+    payload = build_welcome_payload(message, fallback_text=text or DEFAULT_WELCOME_TEXT)
 
     await set_chat_setting(message.chat.id, "welcome_type", payload["welcome_type"])
-    await set_chat_setting(message.chat.id, "welcome_text", payload.get("welcome_text", ""))
+    await set_chat_setting(message.chat.id, "welcome_text", payload.get("welcome_text", DEFAULT_WELCOME_TEXT))
     await set_chat_setting(message.chat.id, "file_id", payload.get("file_id", ""))
     await set_chat_setting(message.chat.id, "welcome_use_card", payload.get("welcome_use_card", True))
     await set_chat_setting(message.chat.id, "welcome_enabled", True)
@@ -220,6 +218,11 @@ async def usecardwelcome_cmd(message: Message) -> None:
 
     await set_chat_setting(message.chat.id, "welcome_use_card", True)
     await set_chat_setting(message.chat.id, "welcome_enabled", True)
+
+    current_text = await get_chat_setting(message.chat.id, "welcome_text", "")
+    if not current_text:
+        await set_chat_setting(message.chat.id, "welcome_text", DEFAULT_WELCOME_TEXT)
+
     await message.reply("Template card + welcome text ကို default welcome အဖြစ် ပြန်ဖွင့်ပြီးပါပြီ ✅")
 
 
@@ -308,11 +311,7 @@ async def send_media_or_text_welcome(
 async def send_welcome(message: Message, user, chat_title: str):
     welcome_type = await get_chat_setting(message.chat.id, "welcome_type", "text")
     welcome_use_card = await get_chat_setting(message.chat.id, "welcome_use_card", True)
-    template = await get_chat_setting(
-        message.chat.id,
-        "welcome_text",
-        "ဟယ်လို {mention} 👋\n{chat_title} မှာ ကြိုဆိုပါတယ်။",
-    )
+    template = await get_chat_setting(message.chat.id, "welcome_text", DEFAULT_WELCOME_TEXT)
     file_id = await get_chat_setting(message.chat.id, "file_id", "")
     buttons = await get_chat_setting(message.chat.id, "welcome_buttons", [])
     markup = build_welcome_buttons(buttons)
@@ -336,6 +335,7 @@ async def send_welcome(message: Message, user, chat_title: str):
                 fullname=fullname,
                 group_name=chat_title,
                 profile_image=profile_image,
+                custom_text=DEFAULT_CARD_TEXT,
             )
             return await message.reply_photo(
                 FSInputFile(card_path),
@@ -359,11 +359,15 @@ async def welcome_new_members(message: Message) -> None:
     if message.chat.type not in {"group", "supergroup"}:
         return
 
-    enabled = await get_chat_setting(message.chat.id, "welcome_enabled", False)
+    enabled = await get_chat_setting(message.chat.id, "welcome_enabled", True)
     if not enabled:
         return
 
-    clean_welcome = await get_chat_setting(message.chat.id, "clean_welcome", False)
+    new_members = message.new_chat_members or []
+    if not new_members:
+        return
+
+    clean_welcome = await get_chat_setting(message.chat.id, "clean_welcome", True)
     last_welcome_id = await get_chat_setting(message.chat.id, "last_welcome_message_id", None)
 
     if clean_welcome and last_welcome_id:
@@ -372,7 +376,11 @@ async def welcome_new_members(message: Message) -> None:
         except Exception:
             pass
 
-    for user in message.new_chat_members:
-        sent = await send_welcome(message, user, message.chat.title or "this chat")
+    for user in new_members:
+        sent = await send_welcome(
+            message=message,
+            user=user,
+            chat_title=message.chat.title or "this chat",
+        )
         if clean_welcome and sent:
             await set_chat_setting(message.chat.id, "last_welcome_message_id", sent.message_id)
