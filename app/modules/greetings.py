@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from aiogram import F, Router
@@ -14,9 +15,17 @@ from app.utils.welcome_card import fetch_user_profile_image, render_card
 
 router = Router()
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
-DEFAULT_WELCOME_TEXT = "ဟယ်လို {mention} 👋\n{chat_title} မှာ ကြိုဆိုပါတယ်။"
-DEFAULT_CARD_TEXT = DEFAULT_WELCOME_TEXT
+DEFAULT_WELCOME_TEXT = "ဟယ်လို {mention} 👋\n{chat_title} မှာ ကြိုဆိုပါတယ်。"
+
+DEFAULT_CARD_TEXT = (
+    "{fullname} ရေ\n\n"
+    "{group_name} မှ\n"
+    "လှိုက်လှဲစွာ ကြိုဆိုပါတယ်။\n\n"
+    "Group ထဲမှာ ပျော်ပျော်ပါးပါး\n"
+    "အတူတူ စကားပြောလိုက်ကြရအောင်။"
+)
 
 
 def build_welcome_buttons(raw_buttons: list[dict] | None):
@@ -342,8 +351,8 @@ async def send_welcome(message: Message, user, chat_title: str):
                 caption=rendered_text,
                 reply_markup=markup,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("Welcome card render failed: %s", e)
 
     return await send_media_or_text_welcome(
         message=message,
@@ -367,7 +376,7 @@ async def welcome_new_members(message: Message) -> None:
     if not new_members:
         return
 
-    clean_welcome = await get_chat_setting(message.chat.id, "clean_welcome", True)
+    clean_welcome = await get_chat_setting(message.chat.id, "clean_welcome", False)
     last_welcome_id = await get_chat_setting(message.chat.id, "last_welcome_message_id", None)
 
     if clean_welcome and last_welcome_id:
